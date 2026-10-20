@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -10,9 +10,13 @@ namespace Il2CppDumper
     {
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private extern static IntPtr LoadLibrary(string path);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private extern static bool SetDllDirectory(string lpPathName);
 
         public static PE Load(string fileName)
         {
+            var dir = Path.GetDirectoryName(fileName);
+            if (!string.IsNullOrEmpty(dir)) SetDllDirectory(dir);
             var buff = File.ReadAllBytes(fileName);
             using var reader = new BinaryStream(new MemoryStream(buff));
             var dosHeader = reader.ReadClass<DosHeader>();

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Il2CppDumper
 {
@@ -31,10 +31,12 @@ namespace Il2CppDumper
         public ulong genericMethodPointersCount;
         public ulong genericMethodPointers;
         [Version(Min = 24.5, Max = 24.5)]
-        [Version(Min = 27.1)]
+        [Version(Min = 27.1, Max = 27.2)]
         public ulong genericAdjustorThunks;
         public ulong invokerPointersCount;
         public ulong invokerPointers;
+        [Version(Min = 29)]
+        public ulong genericAdjustorThunksV29;
         [Version(Max = 24.5)]
         public ulong customAttributeCount;
         [Version(Max = 24.5)]
@@ -47,10 +49,10 @@ namespace Il2CppDumper
         public ulong unresolvedVirtualCallCount; //29.1 unresolvedIndirectCallCount;
         [Version(Min = 22)]
         public ulong unresolvedVirtualCallPointers;
-        [Version(Min = 29.1)]
+        [Version(Min = 29)]
+        public ulong unresolvedInstanceCallCount;
+        [Version(Min = 29)]
         public ulong unresolvedInstanceCallPointers;
-        [Version(Min = 29.1)]
-        public ulong unresolvedStaticCallPointers;
         [Version(Min = 23)]
         public ulong interopDataCount;
         [Version(Min = 23)]

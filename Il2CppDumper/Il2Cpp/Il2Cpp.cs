@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -162,11 +162,17 @@ namespace Il2CppDumper
             invokerPointers = MapVATR<ulong>(pCodeRegistration.invokerPointers, pCodeRegistration.invokerPointersCount);
             if (Version < 27)
             {
-                customAttributeGenerators = MapVATR<ulong>(pCodeRegistration.customAttributeGenerators, pCodeRegistration.customAttributeCount);
+                if (pCodeRegistration.customAttributeCount > 0 && pCodeRegistration.customAttributeCount < 1000000)
+                {
+                    try { customAttributeGenerators = MapVATR<ulong>(pCodeRegistration.customAttributeGenerators, pCodeRegistration.customAttributeCount); } catch { }
+                }
             }
             if (Version > 16 && Version < 27)
             {
-                metadataUsages = MapVATR<ulong>(pMetadataRegistration.metadataUsages, metadataUsagesCount);
+                if (metadataUsagesCount > 0 && metadataUsagesCount < 1000000)
+                {
+                    try { metadataUsages = MapVATR<ulong>(pMetadataRegistration.metadataUsages, metadataUsagesCount); } catch { }
+                }
             }
             if (Version >= 22)
             {
@@ -229,9 +235,12 @@ namespace Il2CppDumper
                         var rgctxRanges = MapVATR<Il2CppTokenRangePair>(codeGenModule.rgctxRanges, codeGenModule.rgctxRangesCount);
                         foreach (var rgctxRange in rgctxRanges)
                         {
-                            var rgctxDefs = new Il2CppRGCTXDefinition[rgctxRange.range.length];
-                            Array.Copy(rgctxs, rgctxRange.range.start, rgctxDefs, 0, rgctxRange.range.length);
-                            rgctxsDefDictionary.Add(rgctxRange.token, rgctxDefs);
+                            if (rgctxRange.range.start >= 0 && rgctxRange.range.length >= 0 && (rgctxRange.range.start + rgctxRange.range.length) <= rgctxs.Length)
+                            {
+                                var rgctxDefs = new Il2CppRGCTXDefinition[rgctxRange.range.length];
+                                Array.Copy(rgctxs, rgctxRange.range.start, rgctxDefs, 0, rgctxRange.range.length);
+                                rgctxsDefDictionary[rgctxRange.token] = rgctxDefs;
+                            }
                         }
                     }
                 }
@@ -244,6 +253,8 @@ namespace Il2CppDumper
             methodSpecs = MapVATR<Il2CppMethodSpec>(pMetadataRegistration.methodSpecs, pMetadataRegistration.methodSpecsCount);
             foreach (var table in genericMethodTable)
             {
+                if (table.genericMethodIndex < 0 || table.genericMethodIndex >= methodSpecs.Length)
+                    continue;
                 var methodSpec = methodSpecs[table.genericMethodIndex];
                 var methodDefinitionIndex = methodSpec.methodDefinitionIndex;
                 if (!methodDefinitionMethodSpecs.TryGetValue(methodDefinitionIndex, out var list))
@@ -252,7 +263,10 @@ namespace Il2CppDumper
                     methodDefinitionMethodSpecs.Add(methodDefinitionIndex, list);
                 }
                 list.Add(methodSpec);
-                methodSpecGenericMethodPointers.Add(methodSpec, genericMethodPointers[table.indices.methodIndex]);
+                if (table.indices.methodIndex >= 0 && table.indices.methodIndex < genericMethodPointers.Length)
+                {
+                    methodSpecGenericMethodPointers[methodSpec] = genericMethodPointers[table.indices.methodIndex];
+                }
             }
         }
 
@@ -325,14 +339,21 @@ namespace Il2CppDumper
             if (Version >= 24.2)
             {
                 var methodToken = methodDef.token;
-                var ptrs = codeGenModuleMethodPointers[imageName];
+                if (!codeGenModuleMethodPointers.TryGetValue(imageName, out var ptrs) || ptrs == null)
+                {
+                    return 0;
+                }
                 var methodPointerIndex = methodToken & 0x00FFFFFFu;
-                return ptrs[methodPointerIndex - 1];
+                if (methodPointerIndex > 0 && methodPointerIndex <= (uint)ptrs.Length)
+                {
+                    return ptrs[methodPointerIndex - 1];
+                }
+                return 0;
             }
             else
             {
                 var methodIndex = methodDef.methodIndex;
-                if (methodIndex >= 0)
+                if (methodIndex >= 0 && methodPointers != null && methodIndex < methodPointers.Length)
                 {
                     return methodPointers[methodIndex];
                 }

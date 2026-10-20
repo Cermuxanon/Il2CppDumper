@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -70,8 +70,16 @@ namespace Il2CppDumper
 
         public override ulong MapVATR(ulong addr)
         {
-            var phdr = programSegment.First(x => addr >= x.p_vaddr && addr <= x.p_vaddr + x.p_memsz);
-            return addr - phdr.p_vaddr + phdr.p_offset;
+            var phdr = programSegment.FirstOrDefault(x => addr >= x.p_vaddr && addr <= x.p_vaddr + x.p_memsz);
+            if (phdr != null)
+            {
+                return addr - phdr.p_vaddr + phdr.p_offset;
+            }
+            if (IsDumped && addr >= ImageBase)
+            {
+                return addr - ImageBase;
+            }
+            return addr;
         }
 
         public override ulong MapRTVA(ulong addr)
@@ -99,29 +107,37 @@ namespace Il2CppDumper
 
         public override bool SymbolSearch()
         {
-            ulong codeRegistration = 0ul;
-            ulong metadataRegistration = 0ul;
-            ulong dynstrOffset = MapVATR(dynamicSection.First(x => x.d_tag == DT_STRTAB).d_un);
-            foreach (var symbol in symbolTable)
+            try
             {
-                var name = ReadStringToNull(dynstrOffset + symbol.st_name);
-                switch (name)
+                ulong codeRegistration = 0ul;
+                ulong metadataRegistration = 0ul;
+                var strtabEntry = dynamicSection.FirstOrDefault(x => x.d_tag == DT_STRTAB);
+                if (strtabEntry == null) return false;
+                ulong dynstrOffset = MapVATR(strtabEntry.d_un);
+                foreach (var symbol in symbolTable)
                 {
-                    case "g_CodeRegistration":
-                        codeRegistration = symbol.st_value;
-                        break;
-                    case "g_MetadataRegistration":
-                        metadataRegistration = symbol.st_value;
-                        break;
+                    var name = ReadStringToNull(dynstrOffset + symbol.st_name);
+                    switch (name)
+                    {
+                        case "g_CodeRegistration":
+                            codeRegistration = symbol.st_value;
+                            break;
+                        case "g_MetadataRegistration":
+                            metadataRegistration = symbol.st_value;
+                            break;
+                    }
+                }
+                if (codeRegistration > 0 && metadataRegistration > 0)
+                {
+                    Console.WriteLine("Detected Symbol !");
+                    Console.WriteLine("CodeRegistration : {0:x}", codeRegistration);
+                    Console.WriteLine("MetadataRegistration : {0:x}", metadataRegistration);
+                    Init(codeRegistration, metadataRegistration);
+                    return true;
                 }
             }
-            if (codeRegistration > 0 && metadataRegistration > 0)
+            catch
             {
-                Console.WriteLine("Detected Symbol !");
-                Console.WriteLine("CodeRegistration : {0:x}", codeRegistration);
-                Console.WriteLine("MetadataRegistration : {0:x}", metadataRegistration);
-                Init(codeRegistration, metadataRegistration);
-                return true;
             }
             Console.WriteLine("ERROR: No symbol is detected");
             return false;

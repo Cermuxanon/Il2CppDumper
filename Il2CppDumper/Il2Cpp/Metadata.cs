@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -60,7 +60,7 @@ namespace Il2CppDumper
             header = ReadClass<Il2CppGlobalMetadataHeader>(0);
             if (version == 24)
             {
-                if (header.stringLiteralOffset == 264)
+                if (header.stringLiteralOffset == 264 || header.stringLiteralOffset == 256)
                 {
                     Version = 24.2;
                     header = ReadClass<Il2CppGlobalMetadataHeader>(0);
@@ -117,7 +117,6 @@ namespace Il2CppDumper
                 {
                     metadataUsageLists = ReadMetadataClassArray<Il2CppMetadataUsageList>(header.metadataUsageListsOffset, header.metadataUsageListsCount);
                     metadataUsagePairs = ReadMetadataClassArray<Il2CppMetadataUsagePair>(header.metadataUsagePairsOffset, header.metadataUsagePairsCount);
-
                     ProcessingMetadataUsage();
                 }
             }
@@ -137,16 +136,26 @@ namespace Il2CppDumper
                 {
                     var dic = new Dictionary<uint, int>();
                     attributeTypeRangesDic[imageDef] = dic;
-                    var end = imageDef.customAttributeStart + imageDef.customAttributeCount;
-                    for (int i = imageDef.customAttributeStart; i < end; i++)
+                    if (Version >= 29)
                     {
-                        if (Version >= 29)
+                        if (attributeDataRanges != null && imageDef.customAttributeStart >= 0 && imageDef.customAttributeStart < attributeDataRanges.Length)
                         {
-                            dic.Add(attributeDataRanges[i].token, i);
+                            var end = Math.Min(attributeDataRanges.Length, imageDef.customAttributeStart + Math.Min(100000, (int)imageDef.customAttributeCount));
+                            for (int i = imageDef.customAttributeStart; i < end; i++)
+                            {
+                                dic[attributeDataRanges[i].token] = i;
+                            }
                         }
-                        else
+                    }
+                    else
+                    {
+                        if (attributeTypeRanges != null && imageDef.customAttributeStart >= 0 && imageDef.customAttributeStart < attributeTypeRanges.Length)
                         {
-                            dic.Add(attributeTypeRanges[i].token, i);
+                            var end = Math.Min(attributeTypeRanges.Length, imageDef.customAttributeStart + Math.Min(100000, (int)imageDef.customAttributeCount));
+                            for (int i = imageDef.customAttributeStart; i < end; i++)
+                            {
+                                dic[attributeTypeRanges[i].token] = i;
+                            }
                         }
                     }
                 }
@@ -181,8 +190,19 @@ namespace Il2CppDumper
         {
             if (!stringCache.TryGetValue(index, out var result))
             {
-                result = ReadStringToNull(header.stringOffset + index);
-                stringCache.Add(index, result);
+                if ((ulong)(header.stringOffset + index) >= (ulong)Length)
+                {
+                    return string.Empty;
+                }
+                try
+                {
+                    result = ReadStringToNull(header.stringOffset + index);
+                }
+                catch
+                {
+                    result = string.Empty;
+                }
+                stringCache[index] = result;
             }
             return result;
         }
@@ -232,7 +252,10 @@ namespace Il2CppDumper
                     var metadataUsagePair = metadataUsagePairs[offset];
                     var usage = GetEncodedIndexType(metadataUsagePair.encodedSourceIndex);
                     var decodedIndex = GetDecodedMethodIndex(metadataUsagePair.encodedSourceIndex);
-                    metadataUsageDic[(Il2CppMetadataUsage)usage][metadataUsagePair.destinationIndex] = decodedIndex;
+                    if (metadataUsageDic.TryGetValue((Il2CppMetadataUsage)usage, out var dict))
+                    {
+                        dict[metadataUsagePair.destinationIndex] = decodedIndex;
+                    }
                 }
             }
             //metadataUsagesCount = metadataUsagePairs.Max(x => x.destinationIndex) + 1;

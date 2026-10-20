@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Il2CppDumper
 {
@@ -167,32 +167,11 @@ namespace Il2CppDumper
     {
         public uint nameIndex;
         public uint namespaceIndex;
-        [Version(Max = 24)]
-        public int customAttributeIndex;
         public int byvalTypeIndex;
-        [Version(Max = 24.5)]
-        public int byrefTypeIndex;
-
         public int declaringTypeIndex;
         public int parentIndex;
-        public int elementTypeIndex; // we can probably remove this one. Only used for enums
-
-        [Version(Max = 24.1)]
-        public int rgctxStartIndex;
-        [Version(Max = 24.1)]
-        public int rgctxCount;
-
+        public int elementTypeIndex;
         public int genericContainerIndex;
-
-        [Version(Max = 22)]
-        public int delegateWrapperFromManagedToNativeIndex;
-        [Version(Max = 22)]
-        public int marshalingFunctionsIndex;
-        [Version(Min = 21, Max = 22)]
-        public int ccwFunctionIndex;
-        [Version(Min = 21, Max = 22)]
-        public int guidIndex;
-
         public uint flags;
 
         public int fieldStart;
@@ -213,23 +192,14 @@ namespace Il2CppDumper
         public ushort interfaces_count;
         public ushort interface_offsets_count;
 
-        // bitfield to portably encode boolean values as single bits
-        // 01 - valuetype;
-        // 02 - enumtype;
-        // 03 - has_finalize;
-        // 04 - has_cctor;
-        // 05 - is_blittable;
-        // 06 - is_import_or_windows_runtime;
-        // 07-10 - One of nine possible PackingSize values (0, 1, 2, 4, 8, 16, 32, 64, or 128)
-        // 11 - PackingSize is default
-        // 12 - ClassSize is default
-        // 13-16 - One of nine possible PackingSize values (0, 1, 2, 4, 8, 16, 32, 64, or 128) - the specified packing size (even for explicit layouts)
         public uint bitfield;
-        [Version(Min = 19)]
         public uint token;
 
         public bool IsValueType => (bitfield & 0x1) == 1;
         public bool IsEnum => ((bitfield >> 1) & 0x1) == 1;
+        public int customAttributeIndex => -1;
+        public int rgctxStartIndex => -1;
+        public int rgctxCount => 0;
     }
 
     public class Il2CppMethodDefinition
@@ -237,27 +207,19 @@ namespace Il2CppDumper
         public uint nameIndex;
         public int declaringType;
         public int returnType;
-        [Version(Min = 31)]
         public int returnParameterToken;
         public int parameterStart;
-        [Version(Max = 24)]
-        public int customAttributeIndex;
         public int genericContainerIndex;
-        [Version(Max = 24.1)]
-        public int methodIndex;
-        [Version(Max = 24.1)]
-        public int invokerIndex;
-        [Version(Max = 24.1)]
-        public int delegateWrapperIndex;
-        [Version(Max = 24.1)]
-        public int rgctxStartIndex;
-        [Version(Max = 24.1)]
-        public int rgctxCount;
         public uint token;
         public ushort flags;
         public ushort iflags;
         public ushort slot;
         public ushort parameterCount;
+
+        public int customAttributeIndex => -1;
+        public int methodIndex => -1;
+        public int rgctxStartIndex => -1;
+        public int rgctxCount => 0;
     }
 
     public class Il2CppParameterDefinition

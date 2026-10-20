@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -9,6 +9,9 @@ namespace Il2CppDumper
     class Program
     {
         private static Config config;
+        private static ulong? cliImageBase;
+        private static ulong? cliCodeRegistration;
+        private static ulong? cliMetadataRegistration;
 
         [STAThread]
         static void Main(string[] args)
@@ -26,15 +29,11 @@ namespace Il2CppDumper
                     return;
                 }
             }
-            if (args.Length > 3)
+            if (args.Length >= 2)
             {
-                ShowHelp();
-                return;
-            }
-            if (args.Length > 1)
-            {
-                foreach (var arg in args)
+                for (int i = 0; i < Math.Min(3, args.Length); i++)
                 {
+                    var arg = args[i];
                     if (File.Exists(arg))
                     {
                         var file = File.ReadAllBytes(arg);
@@ -47,13 +46,22 @@ namespace Il2CppDumper
                             il2cppPath = arg;
                         }
                     }
-                    else if (Directory.Exists(arg))
+                    else
                     {
                         outputDir = Path.GetFullPath(arg) + Path.DirectorySeparatorChar;
                     }
                 }
+
+                if (args.Length > 3)
+                    cliImageBase = Convert.ToUInt64(args[3], 16);
+                if (args.Length > 4)
+                    cliCodeRegistration = Convert.ToUInt64(args[4], 16);
+                if (args.Length > 5)
+                    cliMetadataRegistration = Convert.ToUInt64(args[5], 16);
             }
             outputDir ??= AppDomain.CurrentDomain.BaseDirectory;
+            if (!Directory.Exists(outputDir))
+                Directory.CreateDirectory(outputDir);
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 if (il2cppPath == null)
@@ -104,7 +112,7 @@ namespace Il2CppDumper
                     Console.WriteLine(e);
                 }
             }
-            if (config.RequireAnyKey)
+            if (config.RequireAnyKey && args.Length < 2)
             {
                 Console.WriteLine("Press any key to exit...");
                 Console.ReadKey(true);
@@ -181,13 +189,22 @@ namespace Il2CppDumper
             var version = config.ForceIl2CppVersion ? config.ForceVersion : metadata.Version;
             il2Cpp.SetProperties(version, metadata.metadataUsagesCount);
             Console.WriteLine($"Il2Cpp Version: {il2Cpp.Version}");
-            if (config.ForceDump || il2Cpp.CheckDump())
+            if (cliImageBase.HasValue || config.ForceDump || il2Cpp.CheckDump())
             {
                 if (il2Cpp is ElfBase elf)
                 {
-                    Console.WriteLine("Detected this may be a dump file.");
-                    Console.WriteLine("Input il2cpp dump address or input 0 to force continue:");
-                    var DumpAddr = Convert.ToUInt64(Console.ReadLine(), 16);
+                    ulong DumpAddr;
+                    if (cliImageBase.HasValue)
+                    {
+                        DumpAddr = cliImageBase.Value;
+                        Console.WriteLine($"Using provided dump address: 0x{DumpAddr:X}");
+                    }
+                    else
+                    {
+                        Console.WriteLine("Detected this may be a dump file.");
+                        Console.WriteLine("Input il2cpp dump address or input 0 to force continue:");
+                        DumpAddr = Convert.ToUInt64(Console.ReadLine(), 16);
+                    }
                     if (DumpAddr != 0)
                     {
                         il2Cpp.ImageBase = DumpAddr;
@@ -207,39 +224,60 @@ namespace Il2CppDumper
             Console.WriteLine("Searching...");
             try
             {
-                var flag = il2Cpp.PlusSearch(metadata.methodDefs.Count(x => x.methodIndex >= 0), metadata.typeDefs.Length, metadata.imageDefs.Length);
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                if (cliCodeRegistration.HasValue && cliMetadataRegistration.HasValue)
                 {
-                    if (!flag && il2Cpp is PE)
-                    {
-                        Console.WriteLine("Use custom PE loader");
-                        il2Cpp = PELoader.Load(il2cppPath);
-                        il2Cpp.SetProperties(version, metadata.metadataUsagesCount);
-                        flag = il2Cpp.PlusSearch(metadata.methodDefs.Count(x => x.methodIndex >= 0), metadata.typeDefs.Length, metadata.imageDefs.Length);
-                    }
-                }
-                if (!flag)
-                {
-                    flag = il2Cpp.Search();
-                }
-                if (!flag)
-                {
-                    flag = il2Cpp.SymbolSearch();
-                }
-                if (!flag)
-                {
-                    Console.WriteLine("ERROR: Can't use auto mode to process file, try manual mode.");
-                    Console.Write("Input CodeRegistration: ");
-                    var codeRegistration = Convert.ToUInt64(Console.ReadLine(), 16);
-                    Console.Write("Input MetadataRegistration: ");
-                    var metadataRegistration = Convert.ToUInt64(Console.ReadLine(), 16);
+                    ulong codeRegistration = cliCodeRegistration.Value;
+                    ulong metadataRegistration = cliMetadataRegistration.Value;
+                    Console.WriteLine($"Using provided CodeRegistration: 0x{codeRegistration:X}, MetadataRegistration: 0x{metadataRegistration:X}");
                     il2Cpp.Init(codeRegistration, metadataRegistration);
                 }
-                if (il2Cpp.Version >= 27 && il2Cpp.IsDumped)
+                else
+                {
+                    var flag = false;
+                    try
+                    {
+                        flag = il2Cpp.PlusSearch(metadata.methodDefs.Count(x => x.methodIndex >= 0), metadata.typeDefs.Length, metadata.imageDefs.Length);
+                    }
+                    catch { }
+
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    {
+                        if (!flag && il2Cpp is PE)
+                        {
+                            Console.WriteLine("Use custom PE loader");
+                            il2Cpp = PELoader.Load(il2cppPath);
+                            il2Cpp.SetProperties(version, metadata.metadataUsagesCount);
+                            try
+                            {
+                                flag = il2Cpp.PlusSearch(metadata.methodDefs.Count(x => x.methodIndex >= 0), metadata.typeDefs.Length, metadata.imageDefs.Length);
+                            }
+                            catch { }
+                        }
+                    }
+                    if (!flag)
+                    {
+                        try { flag = il2Cpp.Search(); } catch { }
+                    }
+                    if (!flag)
+                    {
+                        try { flag = il2Cpp.SymbolSearch(); } catch { }
+                    }
+                    if (!flag)
+                    {
+                        Console.WriteLine("ERROR: Can't use auto mode to process file, try manual mode.");
+                        Console.Write("Input CodeRegistration: ");
+                        ulong codeRegistration = Convert.ToUInt64(Console.ReadLine(), 16);
+                        Console.Write("Input MetadataRegistration: ");
+                        ulong metadataRegistration = Convert.ToUInt64(Console.ReadLine(), 16);
+                        il2Cpp.Init(codeRegistration, metadataRegistration);
+                    }
+                }
+                if (il2Cpp.IsDumped)
                 {
                     var typeDef = metadata.typeDefs[0];
                     var il2CppType = il2Cpp.types[typeDef.byvalTypeIndex];
                     metadata.ImageBase = il2CppType.data.typeHandle - metadata.header.typeDefinitionsOffset;
+                    Console.WriteLine($"Computed metadata.ImageBase: 0x{metadata.ImageBase:X}");
                 }
             }
             catch (Exception e)

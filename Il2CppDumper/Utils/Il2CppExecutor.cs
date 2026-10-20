@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -292,29 +292,53 @@ namespace Il2CppDumper
 
         public Il2CppTypeDefinition GetTypeDefinitionFromIl2CppType(Il2CppType il2CppType)
         {
-            if (il2Cpp.Version >= 27 && il2Cpp.IsDumped)
+            if (il2Cpp.IsDumped)
             {
                 var offset = il2CppType.data.typeHandle - metadata.ImageBase - metadata.header.typeDefinitionsOffset;
-                var index = offset / (ulong)metadata.SizeOf(typeof(Il2CppTypeDefinition));
-                return metadata.typeDefs[index];
+                var size = (ulong)metadata.SizeOf(typeof(Il2CppTypeDefinition));
+                if (size > 0)
+                {
+                    var index = offset / size;
+                    if (index < (ulong)metadata.typeDefs.Length)
+                    {
+                        return metadata.typeDefs[index];
+                    }
+                }
+                return null;
             }
             else
             {
-                return metadata.typeDefs[il2CppType.data.klassIndex];
+                if (il2CppType.data.klassIndex >= 0 && il2CppType.data.klassIndex < metadata.typeDefs.Length)
+                {
+                    return metadata.typeDefs[il2CppType.data.klassIndex];
+                }
+                return null;
             }
         }
 
         public Il2CppGenericParameter GetGenericParameteFromIl2CppType(Il2CppType il2CppType)
         {
-            if (il2Cpp.Version >= 27 && il2Cpp.IsDumped)
+            if (il2Cpp.IsDumped)
             {
                 var offset = il2CppType.data.genericParameterHandle - metadata.ImageBase - metadata.header.genericParametersOffset;
-                var index = offset / (ulong)metadata.SizeOf(typeof(Il2CppGenericParameter));
-                return metadata.genericParameters[index];
+                var size = (ulong)metadata.SizeOf(typeof(Il2CppGenericParameter));
+                if (size > 0)
+                {
+                    var index = offset / size;
+                    if (index < (ulong)metadata.genericParameters.Length)
+                    {
+                        return metadata.genericParameters[index];
+                    }
+                }
+                return null;
             }
             else
             {
-                return metadata.genericParameters[il2CppType.data.genericParameterIndex];
+                if (il2CppType.data.genericParameterIndex >= 0 && il2CppType.data.genericParameterIndex < metadata.genericParameters.Length)
+                {
+                    return metadata.genericParameters[il2CppType.data.genericParameterIndex];
+                }
+                return null;
             }
         }
 
@@ -325,17 +349,27 @@ namespace Il2CppDumper
 
         public bool TryGetDefaultValue(int typeIndex, int dataIndex, out object value)
         {
-            var pointer = metadata.GetDefaultValueFromIndex(dataIndex);
-            var defaultValueType = il2Cpp.types[typeIndex];
-            metadata.Position = pointer;
-            if (GetConstantValueFromBlob(defaultValueType.type, metadata.Reader, out var blobValue))
+            value = 0;
+            try
             {
-                value = blobValue.Value;
-                return true;
+                if (typeIndex < 0 || typeIndex >= il2Cpp.types.Length)
+                    return false;
+                var pointer = metadata.GetDefaultValueFromIndex(dataIndex);
+                var defaultValueType = il2Cpp.types[typeIndex];
+                metadata.Position = pointer;
+                if (GetConstantValueFromBlob(defaultValueType.type, metadata.Reader, out var blobValue))
+                {
+                    value = blobValue.Value;
+                    return true;
+                }
+                else
+                {
+                    value = pointer;
+                    return false;
+                }
             }
-            else
+            catch
             {
-                value = pointer;
                 return false;
             }
         }
@@ -367,24 +401,10 @@ namespace Il2CppDumper
                     value.Value = reader.ReadInt16();
                     return true;
                 case Il2CppTypeEnum.IL2CPP_TYPE_U4:
-                    if (il2Cpp.Version >= 29)
-                    {
-                        value.Value = reader.ReadCompressedUInt32();
-                    }
-                    else
-                    {
-                        value.Value = reader.ReadUInt32();
-                    }
+                    value.Value = (metadata.Version >= 29 || (metadata.Version >= 24.2 && metadata.Version < 25)) ? reader.ReadCompressedUInt32() : reader.ReadUInt32();
                     return true;
                 case Il2CppTypeEnum.IL2CPP_TYPE_I4:
-                    if (il2Cpp.Version >= 29)
-                    {
-                        value.Value = reader.ReadCompressedInt32();
-                    }
-                    else
-                    {
-                        value.Value = reader.ReadInt32();
-                    }
+                    value.Value = (metadata.Version >= 29 || (metadata.Version >= 24.2 && metadata.Version < 25)) ? reader.ReadCompressedInt32() : reader.ReadInt32();
                     return true;
                 case Il2CppTypeEnum.IL2CPP_TYPE_U8:
                     value.Value = reader.ReadUInt64();
@@ -399,23 +419,14 @@ namespace Il2CppDumper
                     value.Value = reader.ReadDouble();
                     return true;
                 case Il2CppTypeEnum.IL2CPP_TYPE_STRING:
-                    int length;
-                    if (il2Cpp.Version >= 29)
+                    int length = reader.ReadCompressedInt32();
+                    if (length == -1)
                     {
-                        length = reader.ReadCompressedInt32();
-                        if (length == -1)
-                        {
-                            value.Value = null;
-                        }
-                        else
-                        {
-                            value.Value = Encoding.UTF8.GetString(reader.ReadBytes(length));
-                        }
+                        value.Value = null;
                     }
                     else
                     {
-                        length = reader.ReadInt32();
-                        value.Value = reader.ReadString(length);
+                        value.Value = Encoding.UTF8.GetString(reader.ReadBytes(length));
                     }
                     return true;
                 case Il2CppTypeEnum.IL2CPP_TYPE_SZARRAY:

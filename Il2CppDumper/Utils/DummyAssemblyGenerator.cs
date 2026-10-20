@@ -1,4 +1,4 @@
-﻿using Mono.Cecil;
+using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Collections.Generic;
 using System;
@@ -26,6 +26,8 @@ namespace Il2CppDumper
 
         public DummyAssemblyGenerator(Il2CppExecutor il2CppExecutor, bool addToken)
         {
+            try
+            {
             executor = il2CppExecutor;
             metadata = il2CppExecutor.metadata;
             il2Cpp = il2CppExecutor.il2Cpp;
@@ -54,9 +56,15 @@ namespace Il2CppDumper
             var eventDefinitionDic = new Dictionary<int, EventDefinition>();
 
             //创建程序集，同时创建所有类
+            Console.WriteLine("[Step 1] Creating assemblies and types...");
             foreach (var imageDef in metadata.imageDefs)
             {
                 var imageName = metadata.GetStringFromIndex(imageDef.nameIndex);
+                if (imageDef.assemblyIndex < 0 || imageDef.assemblyIndex >= metadata.assemblyDefs.Length)
+                {
+                    Console.WriteLine($"[ERROR] Invalid assemblyIndex={imageDef.assemblyIndex} for image '{imageName}', assemblyDefs.Length={metadata.assemblyDefs.Length}");
+                    continue;
+                }
                 var aname = metadata.assemblyDefs[imageDef.assemblyIndex].aname;
                 var assemblyName = metadata.GetStringFromIndex(aname.nameIndex);
                 Version vers;
@@ -81,8 +89,14 @@ namespace Il2CppDumper
                 var moduleDefinition = assemblyDefinition.MainModule;
                 moduleDefinition.Types.Clear();//清除自动创建的<Module>类
                 var typeEnd = imageDef.typeStart + imageDef.typeCount;
+                if (typeEnd > metadata.typeDefs.Length)
+                {
+                    Console.WriteLine($"[WARN] image '{imageName}' typeEnd ({typeEnd}) > typeDefs.Length ({metadata.typeDefs.Length}), clamping!");
+                    typeEnd = Math.Min(typeEnd, (uint)metadata.typeDefs.Length);
+                }
                 for (var index = imageDef.typeStart; index < typeEnd; ++index)
                 {
+                    if (index >= metadata.typeDefs.Length) break;
                     var typeDef = metadata.typeDefs[index];
                     var namespaceName = metadata.GetStringFromIndex(typeDef.namespaceIndex);
                     var typeName = metadata.GetStringFromIndex(typeDef.nameIndex);
@@ -94,6 +108,7 @@ namespace Il2CppDumper
                     }
                 }
             }
+            Console.WriteLine("[Step 2] Processing nested types...");
             foreach (var imageDef in metadata.imageDefs)
             {
                 var typeEnd = imageDef.typeStart + imageDef.typeCount;
@@ -113,6 +128,7 @@ namespace Il2CppDumper
                 }
             }
             //提前处理
+            Console.WriteLine("[Step 3] Processing tokens, generics, base types, interfaces...");
             foreach (var imageDef in metadata.imageDefs)
             {
                 var typeEnd = imageDef.typeStart + imageDef.typeCount;
@@ -144,9 +160,16 @@ namespace Il2CppDumper
                     //parent
                     if (typeDef.parentIndex >= 0)
                     {
-                        var parentType = il2Cpp.types[typeDef.parentIndex];
-                        var parentTypeRef = GetTypeReference(typeDefinition, parentType);
-                        typeDefinition.BaseType = parentTypeRef;
+                        if (typeDef.parentIndex >= il2Cpp.types.Length)
+                        {
+                            Console.WriteLine($"[WARN parentIndex] type='{typeDefinition.FullName}', parentIndex={typeDef.parentIndex} >= types.Length ({il2Cpp.types.Length})");
+                        }
+                        else
+                        {
+                            var parentType = il2Cpp.types[typeDef.parentIndex];
+                            var parentTypeRef = GetTypeReference(typeDefinition, parentType);
+                            typeDefinition.BaseType = parentTypeRef;
+                        }
                     }
 
                     //interfaces
@@ -159,6 +182,7 @@ namespace Il2CppDumper
                 }
             }
             //处理field, method, property等等
+            Console.WriteLine("[Step 4] Processing fields, methods, properties...");
             foreach (var imageDef in metadata.imageDefs)
             {
                 var imageName = metadata.GetStringFromIndex(imageDef.nameIndex);
@@ -167,7 +191,8 @@ namespace Il2CppDumper
                 {
                     var typeDef = metadata.typeDefs[index];
                     var typeDefinition = typeDefinitionDic[typeDef];
-
+                    try
+                    {
                     //field
                     var fieldEnd = typeDef.fieldStart + typeDef.field_count;
                     for (var i = typeDef.fieldStart; i < fieldEnd; ++i)
@@ -380,6 +405,12 @@ namespace Il2CppDumper
                             eventDefinition.CustomAttributes.Add(customTokenAttribute);
                         }
                     }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR in Step 4: type {index} '{typeDefinition?.FullName}'] {ex}");
+                        throw;
+                    }
                 }
             }
             //第三遍，添加CustomAttribute
@@ -446,6 +477,12 @@ namespace Il2CppDumper
                     }
                 }
             }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FATAL in DummyAssemblyGenerator.ctor] {ex}");
+                throw;
+            }
         }
 
         private TypeReference GetTypeReferenceWithByRef(MemberReference memberReference, Il2CppType il2CppType)
@@ -464,6 +501,10 @@ namespace Il2CppDumper
         private TypeReference GetTypeReference(MemberReference memberReference, Il2CppType il2CppType)
         {
             var moduleDefinition = memberReference.Module;
+            if (il2CppType == null)
+            {
+                return moduleDefinition.ImportReference(typeSystem.Object);
+            }
             switch (il2CppType.type)
             {
                 case Il2CppTypeEnum.IL2CPP_TYPE_OBJECT:
@@ -506,8 +547,11 @@ namespace Il2CppDumper
                 case Il2CppTypeEnum.IL2CPP_TYPE_VALUETYPE:
                     {
                         var typeDef = executor.GetTypeDefinitionFromIl2CppType(il2CppType);
-                        var typeDefinition = typeDefinitionDic[typeDef];
-                        return moduleDefinition.ImportReference(typeDefinition);
+                        if (typeDef != null && typeDefinitionDic.TryGetValue(typeDef, out var typeDefinition))
+                        {
+                            return moduleDefinition.ImportReference(typeDefinition);
+                        }
+                        return moduleDefinition.ImportReference(typeSystem.Object);
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_ARRAY:
                     {
@@ -517,18 +561,25 @@ namespace Il2CppDumper
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_GENERICINST:
                     {
-                        var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(il2CppType.data.generic_class);
-                        var typeDef = executor.GetGenericClassTypeDefinition(genericClass);
-                        var typeDefinition = typeDefinitionDic[typeDef];
-                        var genericInstanceType = new GenericInstanceType(moduleDefinition.ImportReference(typeDefinition));
-                        var genericInst = il2Cpp.MapVATR<Il2CppGenericInst>(genericClass.context.class_inst);
-                        var pointers = il2Cpp.MapVATR<ulong>(genericInst.type_argv, genericInst.type_argc);
-                        foreach (var pointer in pointers)
+                        try
                         {
-                            var oriType = il2Cpp.GetIl2CppType(pointer);
-                            genericInstanceType.GenericArguments.Add(GetTypeReference(memberReference, oriType));
+                            var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(il2CppType.data.generic_class);
+                            var typeDef = executor.GetGenericClassTypeDefinition(genericClass);
+                            if (typeDef != null && typeDefinitionDic.TryGetValue(typeDef, out var typeDefinition))
+                            {
+                                var genericInstanceType = new GenericInstanceType(moduleDefinition.ImportReference(typeDefinition));
+                                var genericInst = il2Cpp.MapVATR<Il2CppGenericInst>(genericClass.context.class_inst);
+                                var pointers = il2Cpp.MapVATR<ulong>(genericInst.type_argv, genericInst.type_argc);
+                                foreach (var pointer in pointers)
+                                {
+                                    var oriType = il2Cpp.GetIl2CppType(pointer);
+                                    genericInstanceType.GenericArguments.Add(GetTypeReference(memberReference, oriType));
+                                }
+                                return genericInstanceType;
+                            }
                         }
-                        return genericInstanceType;
+                        catch { }
+                        return moduleDefinition.ImportReference(typeSystem.Object);
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_SZARRAY:
                     {
